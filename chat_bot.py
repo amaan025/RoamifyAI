@@ -1,34 +1,50 @@
-import base64
+from flask import Flask, request, jsonify
+import google.generativeai as genai
 import os
-from google import genai
-from google.genai import types
 
+app = Flask(__name__)
 
-def generate():
-    client = genai.Client(api_key="AIzaSyA64UDrH42FCnZUmsxEdpJwY1EMwXKaQ-I")
+my_api_key="AIzaSyDn6j_ABPjd2udehdTqSvXwvjZv5hEgais"
+genai.configure(api_key=my_api_key)
 
-    model = "gemini-2.5-pro-preview-03-25"
-    contents = [
-        types.Content(
-            role="user",
-            parts=[
-                types.Part.from_text(text="""INSERT_INPUT_HERE"""),
-            ],
-        ),
-    ]
-    generate_content_config = types.GenerateContentConfig(
-        response_mime_type="text/plain",
-        system_instruction=[
-            types.Part.from_text(text="""You are a outing planner. Your task is to engage in conversation with user. Once the greetings is done. You will ask the user their location. Then you will ask them what type of outing they prefer. Then you will ask them their budget. Based on their responses, you will create a plan for them that meets their criteria. You need to make sure that the user do not have to travel much and the locations are near to each other and convinient. I need small but friendly responses. After the response you will ask if you want a map with these locations."""),
-        ],
-    )
+generation_config = {
+    "temperature": 1,
+    "top_p": 0.95,
+    "top_k": 40,
+    "max_output_tokens": 8192,
+    "response_mime_type": "text/plain",
+}
 
-    for chunk in client.models.generate_content_stream(
-        model=model,
-        contents=contents,
-        config=generate_content_config,
-    ):
-        print(chunk.text, end="")
+model = genai.GenerativeModel(
+    model_name="gemini-1.5-pro",
+    generation_config=generation_config,
+    system_instruction="You are a outing planner...",  # Your existing instruction
+)
 
-if __name__ == "__main__":
-    generate()
+# Store conversation history per session (in-memory, consider Redis for production)
+conversations = {}
+
+@app.route('/api/chat', methods=['POST'])
+def chat():
+    data = request.json
+    session_id = data.get('session_id', 'default')
+    user_input = data['message']
+    
+    # Get or initialize conversation history
+    if session_id not in conversations:
+        conversations[session_id] = []
+    
+    chat_session = model.start_chat(history=conversations[session_id])
+    response = chat_session.send_message(user_input)
+    
+    # Update history
+    conversations[session_id].append({"role": "user", "parts": [user_input]})
+    conversations[session_id].append({"role": "model", "parts": [response.text]})
+    
+    return jsonify({
+        "response": response.text,
+        "session_id": session_id
+    })
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5001)  # Run on different port if needed
